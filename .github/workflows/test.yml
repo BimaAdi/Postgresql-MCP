@@ -1,0 +1,49 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go-test:
+    name: Go tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: mcp
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        env:
+          TEST_POSTGRES_INTEGRATION: "1"
+          TEST_POSTGRES_HOST: 127.0.0.1
+          TEST_POSTGRES_PORT: "5434"
+          TEST_POSTGRES_USER: user
+          TEST_POSTGRES_PASSWORD: password
+          TEST_POSTGRES_DATABASE: mcp
+          TEST_POSTGRES_SSLMODE: disable
+        run: go test ./...
