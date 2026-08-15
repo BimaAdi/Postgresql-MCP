@@ -2,9 +2,17 @@
 
 An MCP server for PostgreSQL.
 
-## Run
+## How to use
+1. Get the executable
+there are 2 options:
+- download the latest release see [releases](https://github.com/BimaAdi/Postgresql-MCP/releases)
+- build from source see [build from source](./docs/build_from_source.md)
 
-All PostgreSQL connection flags are required:
+2. Integrate it with your code agent see [code agent integration](./docs/code_agent_integration.md)
+
+## Run Manually
+
+Provide the PostgreSQL connection flags on the command line:
 
 ```sh
 go run . \
@@ -13,6 +21,31 @@ go run . \
   --user postgres \
   --password secret \
   --database app
+```
+
+Each flag can also be provided through an environment variable when the flag is
+not set. Command-line flags take precedence:
+
+| Flag | Environment variable |
+| --- | --- |
+| `--host` | `POSTGRES_HOST` |
+| `--port` | `POSTGRES_PORT` |
+| `--user` | `POSTGRES_USER` |
+| `--password` | `POSTGRES_PASSWORD` |
+| `--database` | `POSTGRES_DATABASE` |
+| `--sslmode` | `POSTGRES_SSLMODE` |
+| `--transport` | `MCP_TRANSPORT` |
+| `--mcpaddr` | `MCP_ADDR` |
+
+For example:
+
+```sh
+POSTGRES_HOST=localhost \
+POSTGRES_PORT=5432 \
+POSTGRES_USER=postgres \
+POSTGRES_PASSWORD=secret \
+POSTGRES_DATABASE=app \
+go run .
 ```
 
 The default transport is stdio. To run the streamable HTTP transport:

@@ -117,6 +117,42 @@ func parseConfig(args []string) (config, error) {
 		return config{}, fmt.Errorf("unexpected positional arguments: %v", flags.Args())
 	}
 
+	envValues := map[string]*string{
+		"host":      &cfg.host,
+		"user":      &cfg.user,
+		"password":  &cfg.password,
+		"database":  &cfg.database,
+		"transport": &cfg.transport,
+		"mcpaddr":   &cfg.address,
+		"sslmode":   &cfg.sslmode,
+	}
+	envNames := map[string]string{
+		"host":      "POSTGRES_HOST",
+		"user":      "POSTGRES_USER",
+		"password":  "POSTGRES_PASSWORD",
+		"database":  "POSTGRES_DATABASE",
+		"transport": "MCP_TRANSPORT",
+		"mcpaddr":   "MCP_ADDR",
+		"sslmode":   "POSTGRES_SSLMODE",
+	}
+	for name, value := range envValues {
+		if flagWasSet(flags, name) {
+			continue
+		}
+		if envValue := os.Getenv(envNames[name]); envValue != "" {
+			*value = envValue
+		}
+	}
+	if !flagWasSet(flags, "port") {
+		if envValue := os.Getenv("POSTGRES_PORT"); envValue != "" {
+			port, err := strconv.Atoi(envValue)
+			if err != nil {
+				return config{}, fmt.Errorf("invalid POSTGRES_PORT %q: %w", envValue, err)
+			}
+			cfg.port = port
+		}
+	}
+
 	for name, value := range map[string]string{
 		"--host": cfg.host, "--user": cfg.user, "--password": cfg.password, "--database": cfg.database,
 	} {
@@ -134,6 +170,16 @@ func parseConfig(args []string) (config, error) {
 		return config{}, fmt.Errorf("--mcpaddr must not be empty for HTTP transport")
 	}
 	return cfg, nil
+}
+
+func flagWasSet(flags *flag.FlagSet, name string) bool {
+	set := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
 }
 
 func (c config) dsn() string {
