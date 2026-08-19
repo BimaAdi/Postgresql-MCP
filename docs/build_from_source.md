@@ -3,6 +3,8 @@
 ## Requirement
 - go 1.26
 
-## installation
-- clone this project
-- build the project `go build .`
+## Installation
+- Clone this project.
+- Build the executable with `go build -o postgresql-mcp ./cmd`.
+- Run it with `./postgresql-mcp` and the PostgreSQL flags described in the
+  [README](../README.md).

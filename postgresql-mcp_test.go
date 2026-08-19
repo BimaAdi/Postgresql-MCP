@@ -1,4 +1,4 @@
-package main
+package postgresqlmcp
 
 import (
 	"context"
@@ -9,44 +9,9 @@ import (
 	"testing"
 	"time"
 
+	_ "github.com/lib/pq"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
-
-func TestParseConfigEnvironment(t *testing.T) {
-	t.Setenv("POSTGRES_HOST", "env-host")
-	t.Setenv("POSTGRES_PORT", "5433")
-	t.Setenv("POSTGRES_USER", "env-user")
-	t.Setenv("POSTGRES_PASSWORD", "env-password")
-	t.Setenv("POSTGRES_DATABASE", "env-database")
-	t.Setenv("POSTGRES_SSLMODE", "require")
-	t.Setenv("MCP_TRANSPORT", "http")
-	t.Setenv("MCP_ADDR", ":9090")
-
-	cfg, err := parseConfig(nil)
-	if err != nil {
-		t.Fatalf("parseConfig() error = %v", err)
-	}
-	want := config{host: "env-host", port: 5433, user: "env-user", password: "env-password", database: "env-database", sslmode: "require", transport: "http", address: ":9090"}
-	if cfg != want {
-		t.Fatalf("parseConfig() = %+v, want %+v", cfg, want)
-	}
-}
-
-func TestParseConfigFlagsOverrideEnvironment(t *testing.T) {
-	t.Setenv("POSTGRES_HOST", "env-host")
-	t.Setenv("POSTGRES_PORT", "5433")
-	t.Setenv("POSTGRES_USER", "env-user")
-	t.Setenv("POSTGRES_PASSWORD", "env-password")
-	t.Setenv("POSTGRES_DATABASE", "env-database")
-
-	cfg, err := parseConfig([]string{"--host", "flag-host", "--port", "5434", "--user", "flag-user", "--password", "flag-password", "--database", "flag-database"})
-	if err != nil {
-		t.Fatalf("parseConfig() error = %v", err)
-	}
-	if cfg.host != "flag-host" || cfg.port != 5434 || cfg.user != "flag-user" || cfg.password != "flag-password" || cfg.database != "flag-database" {
-		t.Fatalf("flag values did not override environment: %+v", cfg)
-	}
-}
 
 func TestPostgreSQLTools(t *testing.T) {
 	if os.Getenv("TEST_POSTGRES_INTEGRATION") != "1" {
@@ -54,7 +19,7 @@ func TestPostgreSQLTools(t *testing.T) {
 	}
 
 	cfg := testPostgreSQLConfig(t)
-	dsn := cfg.dsn()
+	dsn := cfg
 	if value := os.Getenv("TEST_POSTGRES_DSN"); value != "" {
 		dsn = value
 	}
@@ -70,7 +35,7 @@ func TestPostgreSQLTools(t *testing.T) {
 		t.Fatalf("ping PostgreSQL: %v", err)
 	}
 
-	server := newServer(db)
+	server := NewServer(db)
 	clientTransport, serverTransport := mcp.NewInMemoryTransports()
 	serverSession, err := server.Connect(ctx, serverTransport, nil)
 	if err != nil {
@@ -91,7 +56,7 @@ func TestPostgreSQLTools(t *testing.T) {
 			t.Fatalf("call ping: %v", err)
 		}
 
-		var output pingOutput
+		var output PingOutput
 		decodeStructuredOutput(t, result, &output)
 		if !output.Connected {
 			t.Fatalf("ping connected = false, message = %q", output.Message)
@@ -103,14 +68,13 @@ func TestPostgreSQLTools(t *testing.T) {
 
 	t.Run("query", func(t *testing.T) {
 		result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
-			Name:      "query",
-			Arguments: map[string]any{"sql": "SELECT 7 AS id, 'postgresql-mcp' AS name, true AS enabled"},
+			Name: "query", Arguments: map[string]any{"sql": "SELECT 7 AS id, 'postgresql-mcp' AS name, true AS enabled"},
 		})
 		if err != nil {
 			t.Fatalf("call query: %v", err)
 		}
 
-		var output queryOutput
+		var output QueryOutput
 		decodeStructuredOutput(t, result, &output)
 		wantColumns := []string{"id", "name", "enabled"}
 		if len(output.Columns) != len(wantColumns) {
@@ -130,7 +94,7 @@ func TestPostgreSQLTools(t *testing.T) {
 	})
 }
 
-func testPostgreSQLConfig(t *testing.T) config {
+func testPostgreSQLConfig(t *testing.T) string {
 	t.Helper()
 	port := 5434
 	if value := os.Getenv("TEST_POSTGRES_PORT"); value != "" {
@@ -140,14 +104,7 @@ func testPostgreSQLConfig(t *testing.T) config {
 		}
 		port = parsed
 	}
-	return config{
-		host:     envOrDefault("TEST_POSTGRES_HOST", "localhost"),
-		port:     port,
-		user:     envOrDefault("TEST_POSTGRES_USER", "user"),
-		password: envOrDefault("TEST_POSTGRES_PASSWORD", "password"),
-		database: envOrDefault("TEST_POSTGRES_DATABASE", "mcp"),
-		sslmode:  envOrDefault("TEST_POSTGRES_SSLMODE", "disable"),
-	}
+	return "postgres://" + envOrDefault("TEST_POSTGRES_USER", "user") + ":" + envOrDefault("TEST_POSTGRES_PASSWORD", "password") + "@" + envOrDefault("TEST_POSTGRES_HOST", "localhost") + ":" + strconv.Itoa(port) + "/" + envOrDefault("TEST_POSTGRES_DATABASE", "mcp") + "?sslmode=" + envOrDefault("TEST_POSTGRES_SSLMODE", "disable")
 }
 
 func envOrDefault(name, fallback string) string {

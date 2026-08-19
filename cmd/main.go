@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	postgresqlmcp "github.com/BimaAdi/postgresql-mcp"
 	_ "github.com/lib/pq"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -28,22 +29,6 @@ type config struct {
 	transport string
 	address   string
 	sslmode   string
-}
-
-type pingInput struct{}
-
-type pingOutput struct {
-	Connected bool   `json:"connected"`
-	Message   string `json:"message"`
-}
-
-type queryInput struct {
-	SQL string `json:"sql" jsonschema:"SQL query to execute"`
-}
-
-type queryOutput struct {
-	Columns []string `json:"columns"`
-	Rows    [][]any  `json:"rows"`
 }
 
 func main() {
@@ -72,14 +57,12 @@ func run() error {
 		return fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
 
-	server := newServer(db)
+	server := postgresqlmcp.NewServer(db)
 	switch cfg.transport {
 	case "stdio":
 		return server.Run(ctx, &mcp.StdioTransport{})
 	case "http":
-		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
-			return server
-		}, &mcp.StreamableHTTPOptions{})
+		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{})
 		httpServer := &http.Server{Addr: cfg.address, Handler: handler}
 		go func() {
 			<-ctx.Done()
@@ -117,24 +100,8 @@ func parseConfig(args []string) (config, error) {
 		return config{}, fmt.Errorf("unexpected positional arguments: %v", flags.Args())
 	}
 
-	envValues := map[string]*string{
-		"host":      &cfg.host,
-		"user":      &cfg.user,
-		"password":  &cfg.password,
-		"database":  &cfg.database,
-		"transport": &cfg.transport,
-		"mcpaddr":   &cfg.address,
-		"sslmode":   &cfg.sslmode,
-	}
-	envNames := map[string]string{
-		"host":      "POSTGRES_HOST",
-		"user":      "POSTGRES_USER",
-		"password":  "POSTGRES_PASSWORD",
-		"database":  "POSTGRES_DATABASE",
-		"transport": "MCP_TRANSPORT",
-		"mcpaddr":   "MCP_ADDR",
-		"sslmode":   "POSTGRES_SSLMODE",
-	}
+	envValues := map[string]*string{"host": &cfg.host, "user": &cfg.user, "password": &cfg.password, "database": &cfg.database, "transport": &cfg.transport, "mcpaddr": &cfg.address, "sslmode": &cfg.sslmode}
+	envNames := map[string]string{"host": "POSTGRES_HOST", "user": "POSTGRES_USER", "password": "POSTGRES_PASSWORD", "database": "POSTGRES_DATABASE", "transport": "MCP_TRANSPORT", "mcpaddr": "MCP_ADDR", "sslmode": "POSTGRES_SSLMODE"}
 	for name, value := range envValues {
 		if flagWasSet(flags, name) {
 			continue
@@ -153,9 +120,7 @@ func parseConfig(args []string) (config, error) {
 		}
 	}
 
-	for name, value := range map[string]string{
-		"--host": cfg.host, "--user": cfg.user, "--password": cfg.password, "--database": cfg.database,
-	} {
+	for name, value := range map[string]string{"--host": cfg.host, "--user": cfg.user, "--password": cfg.password, "--database": cfg.database} {
 		if value == "" {
 			return config{}, fmt.Errorf("%s is required", name)
 		}
@@ -183,60 +148,10 @@ func flagWasSet(flags *flag.FlagSet, name string) bool {
 }
 
 func (c config) dsn() string {
-	u := &url.URL{
-		Scheme: "postgres",
-		Host:   c.host + ":" + strconv.Itoa(c.port),
-		Path:   "/" + c.database,
-		User:   url.UserPassword(c.user, c.password),
-	}
+	u := &url.URL{Scheme: "postgres", Host: c.host + ":" + strconv.Itoa(c.port), Path: "/" + c.database, User: url.UserPassword(c.user, c.password)}
 	query := u.Query()
 	query.Set("connect_timeout", "5")
 	query.Set("sslmode", c.sslmode)
 	u.RawQuery = query.Encode()
 	return u.String()
-}
-
-func newServer(db *sql.DB) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "postgresql-mcp", Version: "0.1.0"}, nil)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "ping",
-		Description: "Check whether the PostgreSQL database connection is working",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ pingInput) (*mcp.CallToolResult, pingOutput, error) {
-		if err := db.PingContext(ctx); err != nil {
-			return nil, pingOutput{Connected: false, Message: "PostgreSQL connection failed"}, fmt.Errorf("PostgreSQL connection failed: %w", err)
-		}
-		return nil, pingOutput{Connected: true, Message: "PostgreSQL connection is healthy"}, nil
-	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "query",
-		Description: "Execute a SQL query against PostgreSQL and return its columns and rows",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, input queryInput) (*mcp.CallToolResult, queryOutput, error) {
-		rows, err := db.QueryContext(ctx, input.SQL)
-		if err != nil {
-			return nil, queryOutput{}, fmt.Errorf("execute SQL query: %w", err)
-		}
-		defer rows.Close()
-
-		columns, err := rows.Columns()
-		if err != nil {
-			return nil, queryOutput{}, fmt.Errorf("read query columns: %w", err)
-		}
-		output := queryOutput{Columns: columns, Rows: make([][]any, 0)}
-		for rows.Next() {
-			values := make([]any, len(columns))
-			scanTargets := make([]any, len(columns))
-			for i := range values {
-				scanTargets[i] = &values[i]
-			}
-			if err := rows.Scan(scanTargets...); err != nil {
-				return nil, queryOutput{}, fmt.Errorf("read query row: %w", err)
-			}
-			output.Rows = append(output.Rows, values)
-		}
-		if err := rows.Err(); err != nil {
-			return nil, queryOutput{}, fmt.Errorf("iterate query rows: %w", err)
-		}
-		return nil, output, nil
-	})
-	return server
 }
